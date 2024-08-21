@@ -1,4 +1,14 @@
+/**
+ *
+ * @author BSIT, Andrea Novati - andrea.novati@n-3.it
+ * @date August 21, 2024
+ * @company N3 S.r.l. - Via Varese, 2 - Saronno (21047) VA
+ * @version 2.0
+ *
+ * First need to connect board to arduino and Read with R and serial monitor. Rotate Reference Capacitor in order to place NaCl reading around 512 value
+ */
 #include <Wire.h>
+#include "PHCalibrationSample.h"
 
 #define I2C_ADDRESS 0x63 // Default I2C address for pH EZO devices
 #define PH_SENSOR_PIN A0 // Analog pin connected to the pH sensor
@@ -9,8 +19,14 @@
 #define LED_IS_OFF "LED is now OFF"
 #define ERROR "Error"
 
-float voltage;
-float pHValue;
+//readings at 31°C
+PHCalibrationSample g_PHLowCalibration (663.88f,4.01f);
+PHCalibrationSample g_PHMidCalibration (577.00f,6.85f);
+PHCalibrationSample g_PHHighCalibration (488.21f,9.98f);
+bool g_PHCalibrated = false;
+
+
+
 int tValue;
 bool requestPending = false;
 char command[10];
@@ -27,30 +43,44 @@ void setup() {
   Serial.begin(38400); // Initialize serial communication for debugging
 }
 
-void loop() {
-  
+const int g_PHAverageNumSamples = 10;
+float g_PHAverageValue = 0.0f;
+float g_PHCalibratedValue = 0.0f;
+
+float g_PHAlpha = 1.0f / g_PHAverageNumSamples; // Smoothing factor
+bool g_PHAverageInit = false;
+
+void loop()
+{
     int sensorValue = analogRead(PH_SENSOR_PIN); // Read the analog value from the sensor
-    voltage = sensorValue * (5.0 / 1023.0);      // Convert the analog reading to voltage
-    pHValue = 7 + ((2.5 - voltage) / 0.18);      // Calculate pH value from voltage (example calibration)
-  
+    
+    if (!g_PHAverageInit)
+    {
+      g_PHAverageValue = sensorValue;
+      g_PHAverageInit = true;
+    }
+
+    g_PHAverageValue = (g_PHAlpha * sensorValue) + ((1.0f - g_PHAlpha) * g_PHAverageValue);
+
+    g_PHCalibratedValue = calibrate(g_PHAverageValue);
+    
     tValue = analogRead(T_SENSOR_PIN); // Read the analog value from the sensor
     
+    if (Serial.available())
+    {
+      String cmd = Serial.readString();
+      cmd.trim(); // Remove any leading/trailing whitespace/newlines
+      if (cmd.length() < sizeof(command)) {
+        // Copy the content of the String into the command buffer
+        strncpy(command, cmd.c_str(), sizeof(command) - 1);
+        command[sizeof(command) - 1] = '\0'; // Ensure null termination
+        requestPending = true;
 
-  if (Serial.available())
-  {
-    String cmd = Serial.readString();
-    cmd.trim(); // Remove any leading/trailing whitespace/newlines
-    if (cmd.length() < sizeof(command)) {
-      // Copy the content of the String into the command buffer
-      strncpy(command, cmd.c_str(), sizeof(command) - 1);
-      command[sizeof(command) - 1] = '\0'; // Ensure null termination
-      requestPending = true;
-
-      requestEvent(); // Call the function to process the command
-    } else {
-      Serial.println("Error: Command too long");
+        requestEvent(); // Call the function to process the command
+      } else {
+        Serial.println("Error: Command too long");
+      }
     }
-  }
 
   // Only read the sensor and calculate pH if there's a pending request
  
@@ -59,6 +89,46 @@ void loop() {
   else 
     delay(100);
 }
+
+
+// Function to interpolate between three points
+float calibrate(float rawValue) {
+  if (g_PHLowCalibration.rawValue < g_PHHighCalibration.rawValue) { 
+    if (rawValue <= g_PHLowCalibration.rawValue) {
+      // Extrapolate below the low-point calibration (pH 4.0)
+      return g_PHLowCalibration.Value;
+    } else if (rawValue <= g_PHMidCalibration.rawValue) {
+      // Interpolate between the low-point and mid-point calibration (pH 4.0 to pH 7.0)
+      return mapValue(rawValue, g_PHLowCalibration.rawValue, g_PHMidCalibration.rawValue, g_PHLowCalibration.Value, g_PHMidCalibration.Value);
+    } else if (rawValue <= g_PHHighCalibration.rawValue) {
+      // Interpolate between the mid-point and high-point calibration (pH 7.0 to pH 10.0)
+      return mapValue(rawValue, g_PHMidCalibration.rawValue, g_PHHighCalibration.rawValue,  g_PHMidCalibration.Value,  g_PHHighCalibration.Value);
+    } else {
+      // Extrapolate above the high-point calibration (pH 10.0)
+      return g_PHHighCalibration.Value;
+    }
+  } else {
+    if (rawValue <= g_PHHighCalibration.rawValue) {
+      // Extrapolate below the low-point calibration (pH 4.0)
+      return g_PHHighCalibration.Value;
+    } else if (rawValue <= g_PHMidCalibration.rawValue) {
+      // Interpolate between the low-point and mid-point calibration (pH 4.0 to pH 7.0)
+      return mapValue(rawValue, g_PHHighCalibration.rawValue, g_PHMidCalibration.rawValue, g_PHHighCalibration.Value, g_PHMidCalibration.Value);
+    } else if (rawValue <= g_PHLowCalibration.rawValue) {
+      // Interpolate between the mid-point and high-point calibration (pH 7.0 to pH 10.0)
+      return mapValue(rawValue, g_PHMidCalibration.rawValue, g_PHLowCalibration.rawValue,  g_PHMidCalibration.Value,  g_PHLowCalibration.Value);
+    } else {
+      // Extrapolate above the high-point calibration (pH 10.0)
+      return g_PHLowCalibration.Value;
+    }
+  }
+
+}
+// Function to perform linear interpolation
+float mapValue(float x, float x1, float x2, float y1, float y2) {
+  return y1 + ((x - x1) * (y2 - y1)) / (x2 - x1);
+}
+
 
 // Function to handle I2C data requests from the master (Raspberry Pi)
 void requestEvent() 
@@ -125,9 +195,13 @@ void exec_R()
     char response[10];
     response[0] = 0;
    
-    dtostrf(pHValue, 5, 2, response); // Convert float to string
+    dtostrf(g_PHCalibratedValue, 5, 2, response); // Convert float to string
     Serial.println(response);
     Wire.write(response);
+
+    dtostrf(g_PHAverageValue, 5, 2, response); // Convert float to string
+    Serial.println(response);
+    
 }
 
 // Configuration Commands
