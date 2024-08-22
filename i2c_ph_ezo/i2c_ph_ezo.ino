@@ -5,13 +5,27 @@
  * @company N3 S.r.l. - Via Varese, 2 - Saronno (21047) VA
  * @version 2.0
  *
- * First need to connect board to arduino and Read with R and serial monitor. Rotate Reference Capacitor in order to place NaCl reading around 512 value
+ * With this project you can easily interface your Arduino and PH-4502C Sensor as a PH-EZO sensor.
+ * 
+ * Why ? 
+ *
+ * Because I need it working on my reef-pi setup and reef-pi contributors does not provide driver code for writing a custom ph module reader.
+ *
+ * First of all need to calibrate PH-4502C board, put the sensor on a PH 7  buffer solution and rotate the potentiometer near the BNC connector until you read 2.5V (if supply voltage is 5V)
+ * 
+ * Features: 
+ *    - 1,2,3 Calibration points
+ *    - Temperature compensation
+ *    - Factory reset by wire or by PIN
+ *    - EEPROM management for calibration, I2C address and Compensation temperature storage
+ *    - PH and Temperature readings with floating average
+ *    - LED for board identification
  */
 #include <Wire.h>
 #include "PHCalibrationSample.h"
 #include <EEPROM.h>
 
-#define SERIAL_DEBUG true
+#define SERIAL_DEBUG true // Set it to false if you do not want Serial port to be used for log purpose
 
 #define EEPROM_LOW_CALIBRATION_ADDRESS 0
 #define EEPROM_MID_CALIBRATION_ADDRESS sizeof(PHCalibrationSample)
@@ -21,21 +35,18 @@
 #define EEPROM_PH_LOW_CALIBRATED_ADDRESS EEPROM_PH_CALIBRATION_POINTS_ADDRESS + sizeof(unsigned short)
 #define EEPROM_PH_MID_CALIBRATED_ADDRESS EEPROM_PH_LOW_CALIBRATED_ADDRESS + sizeof(bool)
 #define EEPROM_PH_HIGH_CALIBRATED_ADDRESS EEPROM_PH_MID_CALIBRATED_ADDRESS + sizeof(bool)
-
 #define EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS EEPROM_PH_HIGH_CALIBRATED_ADDRESS + sizeof(bool)
 #define EEPROM_T_COMPENSATION_SET_ADDRESS EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS + sizeof(float)
 
 #define EEPROM_I2C_ADDRESS_SETADDRESS EEPROM_T_COMPENSATION_SET_ADDRESS + sizeof(bool)
-
-
 #define DEFAULT_I2C_ADDRESS 0x63 // Default I2C address for pH EZO devices
+
 #define PH_SENSOR_PIN A0 // Analog pin connected to the pH sensor
 #define T_SENSOR_PIN A1 // Analog pin connected to the pH sensor
-
 #define FACTORY_RESET_PIN 5
 
 #define TEMPERATURE_FACTOR 23.4f
-
+#define DEFAULT_COMPENSATION_TEMPERATURE 25.0f
 
 #define HARDWARE_INFO "pH,EZO,2.0"
 #define LED_IS_ON "LED is now ON"
@@ -62,7 +73,7 @@ char command[COMMAND_LENGHT];
 int commandIndex = 0;
 bool g_LowEnergyMode = false;
 
-float g_CompensationTemperature = 25.0f;
+float g_CompensationTemperature = DEFAULT_COMPENSATION_TEMPERATURE;
 bool g_CompensationTemperatureSet = false;
 
 int g_I2CAddress = DEFAULT_I2C_ADDRESS;
@@ -165,11 +176,12 @@ void setup_EEPROM()
 
 
 
-void setup() {
+void setup() 
+{
   pinMode(LED_BUILTIN, OUTPUT); // Initialize the onboard LED pin
   pinMode(PH_SENSOR_PIN, INPUT); // Initialize the onboard LED pin
-  pinMode(A1, INPUT); // Initialize the onboard LED pin
-
+  pinMode(T_SENSOR_PIN, INPUT); // Initialize the onboard LED pin
+  pinMode(FACTORY_RESET_PIN,INPUT);
 
   Serial.begin(38400); // Initialize serial communication for debugging
 
@@ -491,7 +503,7 @@ void exec_FACTORY()
   Serial.write("Reset to factory");
   #endif
   //DO NOTHING
-  g_CompensationTemperature = 25.0f;
+  g_CompensationTemperature = DEFAULT_COMPENSATION_TEMPERATURE;
   g_CompensationTemperatureSet = false;
 
   g_I2CAddress = DEFAULT_I2C_ADDRESS;
@@ -554,7 +566,7 @@ Where:
 */
 float temperatureCompensate(float pH_measured, float temperature) {
     const float temperatureCoefficient = 0.03; // pH units per degree Celsius
-    float pH_compensated = pH_measured + ((temperature - 25.0) * temperatureCoefficient);
+    float pH_compensated = pH_measured + ((temperature - 25.0f) * temperatureCoefficient);
     return pH_compensated;
 }
 
