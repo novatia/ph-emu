@@ -22,20 +22,28 @@
 #define EEPROM_PH_MID_CALIBRATED_ADDRESS EEPROM_PH_LOW_CALIBRATED_ADDRESS + sizeof(bool)
 #define EEPROM_PH_HIGH_CALIBRATED_ADDRESS EEPROM_PH_MID_CALIBRATED_ADDRESS + sizeof(bool)
 
+#define EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS EEPROM_PH_HIGH_CALIBRATED_ADDRESS + sizeof(bool)
+#define EEPROM_T_COMPENSATION_SET_ADDRESS EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS + sizeof(float)
 
-#define I2C_ADDRESS 0x63 // Default I2C address for pH EZO devices
+#define EEPROM_I2C_ADDRESS_SETADDRESS EEPROM_T_COMPENSATION_SET_ADDRESS + sizeof(bool)
+
+
+#define DEFAULT_I2C_ADDRESS 0x63 // Default I2C address for pH EZO devices
 #define PH_SENSOR_PIN A0 // Analog pin connected to the pH sensor
 #define T_SENSOR_PIN A1 // Analog pin connected to the pH sensor
 
 #define FACTORY_RESET_PIN 5
 
-
+#define TEMPERATURE_FACTOR 23.4f
 
 
 #define HARDWARE_INFO "pH,EZO,2.0"
 #define LED_IS_ON "LED is now ON"
 #define LED_IS_OFF "LED is now OFF"
 #define ERROR "Error"
+
+#define COMMAND_LENGHT 32
+
 
 //readings at 31°C
 PHCalibrationSample g_PHLowCalibration (663.88f,4.01f);
@@ -49,12 +57,26 @@ bool g_PHHighCalibrated = false;
 
 unsigned short g_PHCalibrationPoints = 0;
 
-#define COMMAND_LENGHT 32
-int tValue;
 bool requestPending = false;
 char command[COMMAND_LENGHT];
 int commandIndex = 0;
 bool g_LowEnergyMode = false;
+
+float g_CompensationTemperature = 25.0f;
+bool g_CompensationTemperatureSet = false;
+
+int g_I2CAddress = DEFAULT_I2C_ADDRESS;
+
+const int g_AverageNumSamples = 10;
+float g_PHAverageValue = 0.0f;
+float g_TAverageValue = 0.0f;
+
+float g_PHCalibratedValue = 0.0f;
+
+float g_TCalibratedValue = 0.0f;
+
+float g_Alpha = 1.0f / g_AverageNumSamples; // Smoothing factor
+bool g_AverageInit = false;
 
 
 void writeHash()
@@ -97,6 +119,10 @@ uint8_t getHash()
     EEPROM.get(EEPROM_PH_LOW_CALIBRATED_ADDRESS, g_PHLowCalibrated);
     EEPROM.get(EEPROM_PH_MID_CALIBRATED_ADDRESS, g_PHMidCalibrated);
     EEPROM.get(EEPROM_PH_HIGH_CALIBRATED_ADDRESS, g_PHHighCalibrated);
+    EEPROM.get(EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS, g_CompensationTemperature);
+    EEPROM.get(EEPROM_T_COMPENSATION_SET_ADDRESS, g_CompensationTemperatureSet);
+    EEPROM.get(EEPROM_I2C_ADDRESS_SETADDRESS, g_I2CAddress);
+    
   }
   
   void SaveSettings()
@@ -109,7 +135,9 @@ uint8_t getHash()
     EEPROM.put(EEPROM_PH_LOW_CALIBRATED_ADDRESS, g_PHLowCalibrated);
     EEPROM.put(EEPROM_PH_MID_CALIBRATED_ADDRESS, g_PHMidCalibrated);
     EEPROM.put(EEPROM_PH_HIGH_CALIBRATED_ADDRESS, g_PHHighCalibrated);
-    
+    EEPROM.put(EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS, g_CompensationTemperature);
+    EEPROM.put(EEPROM_T_COMPENSATION_SET_ADDRESS, g_CompensationTemperatureSet);
+    EEPROM.put(EEPROM_I2C_ADDRESS_SETADDRESS, g_I2CAddress);
     writeHash();
   }
 
@@ -124,12 +152,10 @@ void setup_EEPROM()
 
     if (factory_reset)
     {
-      
         #ifdef SERIAL_DEBUG
         Serial.println("Factory Reset PIN is HIGH.");
         #endif
-
-        SaveSettings();
+        exec_FACTORY();
     }
 
     if (hash == loaded_hash ) {
@@ -139,23 +165,38 @@ void setup_EEPROM()
 
 
 
-
-
-
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT); // Initialize the onboard LED pin
+  pinMode(PH_SENSOR_PIN, INPUT); // Initialize the onboard LED pin
+  pinMode(A1, INPUT); // Initialize the onboard LED pin
 
-  Wire.begin(I2C_ADDRESS); // Initialize I2C with the device address
-  Wire.onRequest(requestEvent); // Register the request event handler
-  Wire.onReceive(receiveEvent); // Register the receive event handler
 
   Serial.begin(38400); // Initialize serial communication for debugging
 
   setup_EEPROM();
+
+
+  Wire.begin(g_I2CAddress); // Initialize I2C with the device address
+  Wire.onRequest(requestEvent); // Register the request event handler
+  Wire.onReceive(receiveEvent); // Register the receive event handler
+
+
   #if SERIAL_DEBUG
   Serial.println("PH-EMU");
-  
+  Serial.print("At address: ");
+  Serial.println(g_I2CAddress);
   print_CalibrationValues();
+  print_TemperatureCompensationValues();
+  #endif
+}
+
+void print_TemperatureCompensationValues()
+{
+ #if SERIAL_DEBUG
+  Serial.print("Temperature compensation set: ");
+  Serial.println(g_CompensationTemperatureSet);
+  Serial.print("Compensation T: ");
+  Serial.println(g_CompensationTemperature);
   #endif
 }
 
@@ -200,29 +241,26 @@ void print_CalibrationValues(){
 
 }
 
-const int g_PHAverageNumSamples = 10;
-float g_PHAverageValue = 0.0f;
-float g_PHCalibratedValue = 0.0f;
-
-float g_PHAlpha = 1.0f / g_PHAverageNumSamples; // Smoothing factor
-bool g_PHAverageInit = false;
 
 void loop()
 {
-    int sensorValue = analogRead(PH_SENSOR_PIN); // Read the analog value from the sensor
+    int ph_sensorValue = analogRead(PH_SENSOR_PIN); // Read the analog value from the sensor
+    int t_sensorValue = analogRead(T_SENSOR_PIN); // Read the analog value from the sensor
     
-    if (!g_PHAverageInit)
+    if (!g_AverageInit)
     {
-      g_PHAverageValue = sensorValue;
-      g_PHAverageInit = true;
+      g_TAverageValue = t_sensorValue;
+      g_PHAverageValue = ph_sensorValue;
+      g_AverageInit = true;
     }
 
-    g_PHAverageValue = (g_PHAlpha * sensorValue) + ((1.0f - g_PHAlpha) * g_PHAverageValue);
+    g_PHAverageValue = (g_Alpha * ph_sensorValue) + ((1.0f - g_Alpha) * g_PHAverageValue);
+    g_TAverageValue = (g_Alpha * t_sensorValue) + ((1.0f - g_Alpha) * g_TAverageValue);
 
     g_PHCalibratedValue = calibrate(g_PHAverageValue);
-    
-    tValue = analogRead(T_SENSOR_PIN); // Read the analog value from the sensor
-    
+
+    g_TCalibratedValue = g_TAverageValue;
+
     if (Serial.available())
     {
       String cmd = Serial.readString();
@@ -318,10 +356,10 @@ void requestEvent()
     exec_LED_QUERY();
   } else if (strncmp(command, "L,", 2) == 0) {
     exec_LED_SET();
-  } else if (strncmp(command, "T,", 2) == 0) {
-    exec_TEMP_COMP();
   } else if (strcmp(command, "T,?") == 0) {
     exec_TEMP_QUERY();
+  }else if (strncmp(command, "T,", 2) == 0) {
+    exec_TEMP_COMP();
   } else if (strcmp(command, "Status") == 0) {
     exec_STATUS();
   } else if (strcmp(command, "Find") == 0) {
@@ -355,9 +393,11 @@ void exec_R()
     // Send pH value
     char response[10];
     response[0] = 0;
-   
-    dtostrf(g_PHCalibratedValue, 5, 2, response); // Convert float to string
-      #ifdef SERIAL_DEBUG
+
+    float PHValue = temperatureCompensate(g_PHCalibratedValue,g_CompensationTemperature);
+
+    dtostrf(PHValue, 5, 2, response); // Convert float to string
+    #ifdef SERIAL_DEBUG
     Serial.println(response);
     #endif
     Wire.write(response);
@@ -380,19 +420,26 @@ void exec_SLEEP()
 // T, <temperature>: Sets the temperature for automatic temperature compensation.
 void exec_TEMP_COMP()
 {
-    //DO NOTHING
+    g_CompensationTemperatureSet = true;
+    // Extract the temperature value from the command
+    char* tempValueStr = command + 2; // Skip the "T," part
+    g_CompensationTemperature = atof(tempValueStr); // Convert the extracted string to a float
+
+    SaveSettings();
+    exec_TEMP_QUERY();
 }
 
 void exec_TEMP_QUERY()
 {
+    #ifdef SERIAL_DEBUG
+    print_TemperatureCompensationValues();
+    #endif
+
  // Send pH value
     char response[10];
     response[0] = 0;
-
-    itoa(tValue, response, 10); // Convert float to string
-      #ifdef SERIAL_DEBUG
-    Serial.println(response);
-    #endif
+    dtostrf(g_CompensationTemperature, 5, 2, response); // Convert float to string
+   
     Wire.write(response);
 }
 // Information Commands
@@ -407,7 +454,9 @@ void exec_TEMP_QUERY()
 // Third Field (3): This field indicates the number of consecutive successful readings or a counter of some other status metric depending on the firmware version.
 void exec_STATUS()
 {
+  #ifdef SERIAL_DEBUG
   Serial.write("0,0.0,3");
+  #endif
   Wire.write("0,0.0,3");
 }
 
@@ -428,7 +477,9 @@ void exec_FIND()
 //     Info: Provides information about the device, including firmware version.
 void exec_INFO()
 {
+  #ifdef SERIAL_DEBUG
   Serial.write(HARDWARE_INFO);
+  #endif
   Wire.write(HARDWARE_INFO);
 }
 
@@ -436,8 +487,17 @@ void exec_INFO()
 //     Factory: Restores the device to its factory default settings.
 void exec_FACTORY()
 {
+  #ifdef SERIAL_DEBUG
   Serial.write("Reset to factory");
+  #endif
   //DO NOTHING
+  g_CompensationTemperature = 25.0f;
+  g_CompensationTemperatureSet = false;
+
+  g_I2CAddress = DEFAULT_I2C_ADDRESS;
+
+  exec_CAL_CLEAR();
+  SaveSettings();
 }
 
 //    Cal,?: Queries the current calibration status.
@@ -481,6 +541,22 @@ void exec_CAL_QUERY()
   
 }
 
+/*
+The general formula for pH temperature compensation is:
+pHcompensated=pHmeasured+(Tcurrent−25)×Temperature Coefficient
+
+Where:
+
+    pHcompensatedpHcompensated​ is the temperature-compensated pH value.
+    pHmeasuredpHmeasured​ is the pH value measured at the current temperature.
+    TcurrentTcurrent​ is the current temperature in °C.
+    Temperature Coefficient is typically around 0.03 pH units per degree Celsius.
+*/
+float temperatureCompensate(float pH_measured, float temperature) {
+    const float temperatureCoefficient = 0.03; // pH units per degree Celsius
+    float pH_compensated = pH_measured + ((temperature - 25.0) * temperatureCoefficient);
+    return pH_compensated;
+}
 
 /*
  readings at 31°C with buffer solution and sensor model: PH Electrode ph range ph 0-14 working temperature 0-60 Apex ce specialists GMBH MILA 31200 E312
@@ -623,13 +699,41 @@ void exec_CAL_HIGH()
 //    I2C,?: Queries the current I2C address.
 void exec_I2C_QUERY()
 {
-
+char response[10];
+    
+    // Convert the I2C address to a string in hexadecimal format
+    snprintf(response, sizeof(response), "0x%02X", g_I2CAddress);
+    
+    // Send the response over I2C
+    Wire.write(response);
+    
+    #ifdef SERIAL_DEBUG
+    Serial.print("Current I2C Address: ");
+    Serial.println(response);
+    #endif
 }
 
 //    I2C, <address>: Sets a new I2C address for the device.
 void exec_I2C_SET()
 {
+    // Extract the new I2C address from the command string
+    char* newAddressStr = command + 4; // Skip "I2C,"
+    int newAddress = strtol(newAddressStr, NULL, 16); // Convert hex string to an integer
 
+    // Validate the new address
+    if (newAddress < 0x08 || newAddress > 0x77) {
+        #ifdef SERIAL_DEBUG
+        Serial.println("Invalid I2C Address. Must be between 0x08 and 0x77.");
+        #endif
+        Wire.write("ERROR");
+        return;
+    }
+    else 
+    {
+      g_I2CAddress = newAddress;
+      SaveSettings();
+      Wire.write("OK"); // Confirm the address change
+    }
 }
 
 int g_LedStatus = 0;
