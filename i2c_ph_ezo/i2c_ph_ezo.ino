@@ -379,7 +379,7 @@ void requestEvent()
   } else if (strcmp(command, "Factory") == 0) {
     exec_FACTORY();
   } else {
-    Wire.write("Unknown");
+    Wire.write("Unknown\0");
   }
 
   memset(command, 0, sizeof(command));
@@ -412,10 +412,11 @@ void exec_R()
     #ifdef SERIAL_DEBUG
     Serial.println(response);
     #endif
-    Wire.write(response);
-
+    //Wire.write(response);
+    Wire.write((const uint8_t*)response, sizeof(response));  // Sends the entire message including null terminator
+    
     dtostrf(g_PHAverageValue, 5, 2, response); // Convert float to string
-      #ifdef SERIAL_DEBUG
+    #ifdef SERIAL_DEBUG
     Serial.println(response);
     #endif
     
@@ -452,7 +453,8 @@ void exec_TEMP_QUERY()
     response[0] = 0;
     dtostrf(g_CompensationTemperature, 5, 2, response); // Convert float to string
    
-    Wire.write(response);
+    //  Wire.write(response);
+    Wire.write((const uint8_t*)response, sizeof(response));  // Sends the entire message including null terminator
 }
 // Information Commands
 //     Status: Retrieves the status of the device.
@@ -469,7 +471,7 @@ void exec_STATUS()
   #ifdef SERIAL_DEBUG
   Serial.write("0,0.0,3");
   #endif
-  Wire.write("0,0.0,3");
+  Wire.write("0,0.0,3\0");
 }
 
 //     Find: Causes the LED to blink for identifying the device.
@@ -492,7 +494,7 @@ void exec_INFO()
   #ifdef SERIAL_DEBUG
   Serial.write(HARDWARE_INFO);
   #endif
-  Wire.write(HARDWARE_INFO);
+  Wire.write(HARDWARE_INFO "\0");
 }
 
 // Factory Reset
@@ -529,26 +531,26 @@ void exec_CAL_QUERY()
         #ifdef SERIAL_DEBUG
         Serial.println("*CAL,1");
         #endif
-        Wire.write("*CAL,1");
+        Wire.write("*CAL,1\0");
         break;
       case 2:
         #ifdef SERIAL_DEBUG
         Serial.println("*CAL,2");
         #endif
-        Wire.write("*CAL,2");
+        Wire.write("*CAL,2\0");
         break;
       case 3:
         #ifdef SERIAL_DEBUG
         Serial.println("*CAL,3");
         #endif
-        Wire.write("*CAL,3");
+        Wire.write("*CAL,3\0");
         break;
     };
   }else {
   #ifdef SERIAL_DEBUG
    Serial.println("*CAL");
    #endif
-   Wire.write("*CAL");
+   Wire.write("*CAL\0");
   }
   
 }
@@ -717,8 +719,8 @@ char response[10];
     snprintf(response, sizeof(response), "0x%02X", g_I2CAddress);
     
     // Send the response over I2C
-    Wire.write(response);
-    
+    //Wire.write(response);
+    Wire.write((const uint8_t*)response, sizeof(response));  // Sends the entire message including null terminator
     #ifdef SERIAL_DEBUG
     Serial.print("Current I2C Address: ");
     Serial.println(response);
@@ -737,14 +739,14 @@ void exec_I2C_SET()
         #ifdef SERIAL_DEBUG
         Serial.println("Invalid I2C Address. Must be between 0x08 and 0x77.");
         #endif
-        Wire.write("ERROR");
+        Wire.write(ERROR "\0");
         return;
     }
     else 
     {
       g_I2CAddress = newAddress;
       SaveSettings();
-      Wire.write("OK"); // Confirm the address change
+      Wire.write("OK\0"); // Confirm the address change
     }
 }
 
@@ -758,14 +760,14 @@ void exec_LED_QUERY()
       #ifdef SERIAL_DEBUG
     Serial.println("1");
     #endif
-    Wire.write("1");
+    Wire.write("1\0");
   }
   else
   {
       #ifdef SERIAL_DEBUG
     Serial.println("0");
     #endif
-    Wire.write("0");
+    Wire.write("0\0");
   }
 }
 
@@ -776,13 +778,13 @@ void exec_LED_SET()
   if (command[2] == '1') {
     g_LedStatus = 1;
     digitalWrite(LED_BUILTIN, HIGH); // Turn the onboard LED on
-    Wire.write(LED_IS_ON);
+    Wire.write(LED_IS_ON "\0" );
       #ifdef SERIAL_DEBUG
     Serial.println(LED_IS_ON);
     #endif
   } else if (command[2] == '0') {
     digitalWrite(LED_BUILTIN, LOW);  // Turn the onboard LED off
-    Wire.write(LED_IS_OFF);
+    Wire.write(LED_IS_OFF "\0");
       #ifdef SERIAL_DEBUG
     Serial.println(LED_IS_OFF);
     #endif
@@ -791,6 +793,6 @@ void exec_LED_SET()
       #ifdef SERIAL_DEBUG
     Serial.println(ERROR);
     #endif
-    Wire.write(ERROR);
+    Wire.write(ERROR "\0");
   }
 }
