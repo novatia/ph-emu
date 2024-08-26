@@ -412,12 +412,14 @@ void receiveEvent(int howMany) {
     char c = Wire.read();
     if (c == ATLAS_COMMAND_CHAR_TERMINATOR || commandIndex >= sizeof(command) - 1) {
       command[commandIndex] = '\0'; // Null-terminate the string
-      commandIndex = 0; // Reset command index
-
+    
       // Convert command to uppercase
       for (int i = 0; i < commandIndex; i++) {
         command[i] = toupper(command[i]);
       }
+
+      commandIndex = 0; // Reset command index
+
     } else {
       command[commandIndex++] = c; // Store the character
     }
