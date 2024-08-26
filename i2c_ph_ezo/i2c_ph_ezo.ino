@@ -362,7 +362,7 @@ void requestEvent()
 {
   if (strcmp(command, "R") == 0) {
     exec_R();
-  } else if (strcmp(command, "INFO") == 0) {
+  } else if (strcmp(command, "INFO") == 0 || strcmp(command, "I") == 0) {
     exec_INFO();
   } else if (strcmp(command, "CAL,?") == 0) {
     exec_CAL_QUERY();
