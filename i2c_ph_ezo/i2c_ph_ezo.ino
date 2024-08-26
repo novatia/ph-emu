@@ -22,17 +22,34 @@
  *    - LED for board identification
  */
 #include <Wire.h>
-#include "PHCalibrationSample.h"
 #include <EEPROM.h>
 
-#define ATLAS_COMMAND_TERMINATOR "\x00"
-#define ATLAS_NO_DATA "\xFF"
-#define ATLAS_PENDINS "\xFE"
-#define ATLAS_FAILED "\x02"
-#define ATLAS_SUCCEDED "\x01"
+#include "PHCalibrationSample.h"
+
+#define VERSION "2.1"
+
+#define ATLAS_COMMAND_TERMINATOR 0x0
+#define ATLAS_FAILED 0x02
+#define ATLAS_SUCCEDED 0x01
+#define ATLAS_NO_DATA 0xFF
+#define ATLAS_PENDINS 0xFE
+
 #define ATLAS_COMMAND_CHAR_TERMINATOR '\x00'
 
+
+#define HARDWARE_INFO "?I,PH," VERSION
+#define LED_IS_ON "LED is now ON"
+#define LED_IS_OFF "LED is now OFF"
+#define ERROR "Error"
+#define SUCCESS "OK"
+#define DEFAULT_NAME "PH-EMU"
+#define COMMAND_LENGHT 32
+#define TEMPERATURE_FACTOR 23.4f
+
+
+
 #define SERIAL_DEBUG true // Set it to false if you do not want Serial port to be used for log purpose
+
 
 #define EEPROM_LOW_CALIBRATION_ADDRESS 0
 #define EEPROM_MID_CALIBRATION_ADDRESS sizeof(PHCalibrationSample)
@@ -44,23 +61,15 @@
 #define EEPROM_PH_HIGH_CALIBRATED_ADDRESS EEPROM_PH_MID_CALIBRATED_ADDRESS + sizeof(bool)
 #define EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS EEPROM_PH_HIGH_CALIBRATED_ADDRESS + sizeof(bool)
 #define EEPROM_T_COMPENSATION_SET_ADDRESS EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS + sizeof(float)
-
 #define EEPROM_I2C_ADDRESS_SETADDRESS EEPROM_T_COMPENSATION_SET_ADDRESS + sizeof(bool)
+
+
 #define DEFAULT_I2C_ADDRESS 0x63 // Default I2C address for pH EZO devices
+#define DEFAULT_COMPENSATION_TEMPERATURE 25.0f
 
 #define PH_SENSOR_PIN A0 // Analog pin connected to the pH sensor
 #define T_SENSOR_PIN A1 // Analog pin connected to the pH sensor
 #define FACTORY_RESET_PIN 5
-
-#define TEMPERATURE_FACTOR 23.4f
-#define DEFAULT_COMPENSATION_TEMPERATURE 25.0f
-
-#define HARDWARE_INFO "?I,PH,1.0"
-#define LED_IS_ON "LED is now ON"
-#define LED_IS_OFF "LED is now OFF"
-#define ERROR "Error"
-#define NAME "PH-EMU"
-#define COMMAND_LENGHT 32
 
 
 //readings at 31°C
@@ -97,6 +106,9 @@ float g_Alpha = 1.0f / g_AverageNumSamples; // Smoothing factor
 bool g_AverageInit = false;
 
 
+char response[COMMAND_LENGHT];
+
+
 void writeHash()
 {
    int eepromSize = EEPROM.length(); // Get the total number of bytes in the EEPROM
@@ -129,6 +141,7 @@ uint8_t getHash()
     #ifdef SERIAL_DEBUG
       Serial.println("Loading EEPROM settings");
     #endif
+    
     EEPROM.get(EEPROM_LOW_CALIBRATION_ADDRESS, g_PHLowCalibration);
     EEPROM.get(EEPROM_MID_CALIBRATION_ADDRESS, g_PHMidCalibration);
     EEPROM.get(EEPROM_HIGH_CALIBRATION_ADDRESS, g_PHHighCalibration);
@@ -140,7 +153,6 @@ uint8_t getHash()
     EEPROM.get(EEPROM_T_COMPENSATION_TEMPERATURE_ADDRESS, g_CompensationTemperature);
     EEPROM.get(EEPROM_T_COMPENSATION_SET_ADDRESS, g_CompensationTemperatureSet);
     EEPROM.get(EEPROM_I2C_ADDRESS_SETADDRESS, g_I2CAddress);
-    
   }
   
   void SaveSettings()
@@ -176,12 +188,11 @@ void setup_EEPROM()
         exec_FACTORY();
     }
 
-    if (hash == loaded_hash ) {
+    if (hash == loaded_hash )
+    {
       LoadSettings();
     }
 }
-
-
 
 void setup() 
 {
@@ -207,6 +218,8 @@ void setup()
   print_CalibrationValues();
   print_TemperatureCompensationValues();
   #endif
+
+  memset(response, 0, sizeof(response));
 }
 
 void print_TemperatureCompensationValues()
@@ -219,7 +232,7 @@ void print_TemperatureCompensationValues()
   #endif
 }
 
-void print_CalibrationValues(){
+void print_CalibrationValues() {
   #if SERIAL_DEBUG
   Serial.print("Calibrated: ");
   Serial.println(g_PHCalibrated);
@@ -390,13 +403,13 @@ void requestEvent()
   } else if (strcmp(command, "name,?") == 0) {
     exec_NAME_QUERY();
   }else {
-    Wire.write( ATLAS_FAILED "Unknown" ATLAS_COMMAND_TERMINATOR );
+    I2CResponse( ATLAS_FAILED ,"Unknown");
   }
 
   memset(command, 0, sizeof(command));
   commandIndex = 0;
 }
-
+ 
 // Function to handle I2C data reception from the master (Raspberry Pi)
 void receiveEvent(int howMany) {
   while (Wire.available()) {
@@ -413,9 +426,9 @@ void receiveEvent(int howMany) {
 // R: Takes a single pH reading.
 void exec_R()
 {
+    memset(response, 0, sizeof(response));
     // Send pH value
-    char response[8] = {0,0,0,0,0,0,0,0};
-    
+       
     
     float PHValue = temperatureCompensate(g_PHCalibratedValue,g_CompensationTemperature);
 
@@ -452,7 +465,19 @@ void exec_TEMP_COMP()
 
     SaveSettings();
 
-    Wire.write(  ATLAS_SUCCEDED ATLAS_COMMAND_TERMINATOR );
+    I2CResponse(ATLAS_SUCCEDED,"");
+}
+
+void I2CResponse(char result, String value) 
+{
+    memset(response, 0, sizeof(response));
+    
+    response[0] = result;
+ 
+    memset(response, 1, sizeof(value));
+   
+    response[sizeof(value)] = ATLAS_COMMAND_TERMINATOR;
+    Wire.write((const uint8_t*)response, sizeof(response));
 }
 
 void exec_TEMP_QUERY()
@@ -462,7 +487,7 @@ void exec_TEMP_QUERY()
     #endif
 
  // Send pH value
-    char response[10];
+    char response[COMMAND_LENGHT];
     response[0] = 0;
     dtostrf(g_CompensationTemperature, 5, 2, response); // Convert float to string
    
@@ -492,15 +517,15 @@ void exec_STATUS()
   #ifdef SERIAL_DEBUG
   Serial.write("?STATUS,0");
   #endif
-  Wire.write(ATLAS_SUCCEDED "?STATUS,0" ATLAS_COMMAND_TERMINATOR);
+  I2CResponse(ATLAS_SUCCEDED ,"?STATUS,0");
 }
 
 void exec_NAME_QUERY()
 {
   #ifdef SERIAL_DEBUG
-  Serial.write(NAME);
+  Serial.write(DEFAULT_NAME);
   #endif
-  Wire.write(ATLAS_SUCCEDED NAME ATLAS_COMMAND_TERMINATOR);
+  I2CResponse(ATLAS_SUCCEDED ,DEFAULT_NAME);
 }
 
 //     Find: Causes the LED to blink for identifying the device.
@@ -523,7 +548,7 @@ void exec_INFO()
   #ifdef SERIAL_DEBUG
   Serial.write(HARDWARE_INFO);
   #endif
-  Wire.write(ATLAS_SUCCEDED HARDWARE_INFO ATLAS_COMMAND_TERMINATOR);
+  I2CResponse(ATLAS_SUCCEDED , HARDWARE_INFO );
 }
 
 // Factory Reset
@@ -561,26 +586,26 @@ void exec_CAL_QUERY()
         #ifdef SERIAL_DEBUG
         Serial.println("?CAL,1");
         #endif
-        Wire.write(ATLAS_SUCCEDED "*CAL,1" ATLAS_COMMAND_TERMINATOR);
+        I2CResponse(ATLAS_SUCCEDED,"*CAL,1");
         break;
       case 2:
         #ifdef SERIAL_DEBUG
         Serial.println("?CAL,2");
         #endif
-        Wire.write(ATLAS_SUCCEDED "*CAL,2" ATLAS_COMMAND_TERMINATOR);
+        I2CResponse(ATLAS_SUCCEDED,"*CAL,2");
         break;
       case 3:
         #ifdef SERIAL_DEBUG
         Serial.println("?CAL,3");
         #endif
-        Wire.write(ATLAS_SUCCEDED "?CAL,3" ATLAS_COMMAND_TERMINATOR);
+        I2CResponse(ATLAS_SUCCEDED,"*CAL,3");
         break;
     };
   }else {
   #ifdef SERIAL_DEBUG
-   Serial.println("?CAL,0");
-   #endif
-   Wire.write(ATLAS_SUCCEDED "?CAL,0" ATLAS_COMMAND_TERMINATOR);
+  Serial.println("?CAL,0");
+  #endif
+  I2CResponse(ATLAS_SUCCEDED,"*CAL,0");
   }
   
 }
@@ -651,8 +676,8 @@ void exec_CAL_CLEAR()
   
   g_PHCalibrationPoints = 0;
   SaveSettings();
-  
-  Wire.write(ATLAS_SUCCEDED ATLAS_COMMAND_TERMINATOR);
+
+  I2CResponse(ATLAS_SUCCEDED, "");
 }
 
 //    Cal,low, <value>: Sets a low-point calibration.
@@ -682,7 +707,8 @@ void exec_CAL_LOW()
     SaveSettings();
 
     // Respond with the current calibration status
-   Wire.write(ATLAS_SUCCEDED ATLAS_COMMAND_TERMINATOR);
+    
+  I2CResponse(ATLAS_SUCCEDED, "");
 }
 
 //    Cal,mid, <value>: Sets a mid-point calibration (usually 7.00).
@@ -707,7 +733,8 @@ void exec_CAL_MID()
     SaveSettings();
 
     // Respond with the current calibration status
-   Wire.write(ATLAS_SUCCEDED ATLAS_COMMAND_TERMINATOR);
+    I2CResponse(ATLAS_SUCCEDED, "");
+  
 }
 
 //    Cal,high, <value>: Sets a high-point calibration.
@@ -736,21 +763,22 @@ void exec_CAL_HIGH()
     SaveSettings();
 
     // Respond with the current calibration status
-    Wire.write(ATLAS_SUCCEDED ATLAS_COMMAND_TERMINATOR);
+    I2CResponse(ATLAS_SUCCEDED, "");
 }
 
 //    I2C,?: Queries the current I2C address.
 void exec_I2C_QUERY()
 {
-char response[10];
+    char c_address[5];
     
     // Convert the I2C address to a string in hexadecimal format
-    snprintf(response, sizeof(response), "0x%02X", g_I2CAddress);
+    snprintf(c_address, sizeof(c_address), "0x%02X", g_I2CAddress);
     
     // Send the response over I2C
     //Wire.write(response);
-    Wire.write(  ATLAS_SUCCEDED );
-    Wire.write((const uint8_t*)response, sizeof(response));  // Sends the entire message including null terminator
+    String s_address (c_address);
+    I2CResponse(ATLAS_SUCCEDED, s_address);
+    
     #ifdef SERIAL_DEBUG
     Serial.print("Current I2C Address: ");
     Serial.println(response);
@@ -769,14 +797,14 @@ void exec_I2C_SET()
         #ifdef SERIAL_DEBUG
         Serial.println("Invalid I2C Address. Must be between 0x08 and 0x77.");
         #endif
-        Wire.write(ATLAS_FAILED ERROR ATLAS_COMMAND_TERMINATOR);
+        I2CResponse(ATLAS_FAILED , ERROR );
         return;
     }
     else 
     {
       g_I2CAddress = newAddress;
       SaveSettings();
-      Wire.write(ATLAS_SUCCEDED "OK" ATLAS_COMMAND_TERMINATOR); // Confirm the address change
+      I2CResponse(ATLAS_SUCCEDED , SUCCESS );
     }
 }
 
@@ -790,17 +818,16 @@ void exec_LED_QUERY()
     #ifdef SERIAL_DEBUG
     Serial.println("?L,1");
     #endif
-    Wire.write(ATLAS_SUCCEDED "?L,1" ATLAS_COMMAND_TERMINATOR);
+    I2CResponse(ATLAS_SUCCEDED , "?L,1" );
   }
   else
   {
     #ifdef SERIAL_DEBUG
     Serial.println("?L,0");
     #endif
-    Wire.write(ATLAS_SUCCEDED "?L,0" ATLAS_COMMAND_TERMINATOR);
+    I2CResponse(ATLAS_SUCCEDED , "?L,0" );
   }
 }
-
 
 // L, <state>: Turns the LED on or off, where <state> can be 1 (on) or 0 (off).
 void exec_LED_SET()
@@ -808,14 +835,15 @@ void exec_LED_SET()
   if (command[2] == '1') {
     g_LedStatus = 1;
     digitalWrite(LED_BUILTIN, HIGH); // Turn the onboard LED on
-    Wire.write(ATLAS_SUCCEDED LED_IS_ON ATLAS_COMMAND_TERMINATOR );
+    
+    I2CResponse(ATLAS_SUCCEDED , LED_IS_ON );
       #ifdef SERIAL_DEBUG
     Serial.println(LED_IS_ON);
     #endif
   } else if (command[2] == '0') {
     digitalWrite(LED_BUILTIN, LOW);  // Turn the onboard LED off
-    Wire.write(ATLAS_SUCCEDED LED_IS_OFF ATLAS_COMMAND_TERMINATOR);
-      #ifdef SERIAL_DEBUG
+    I2CResponse(ATLAS_SUCCEDED , LED_IS_OFF );
+    #ifdef SERIAL_DEBUG
     Serial.println(LED_IS_OFF);
     #endif
     g_LedStatus = 0;
@@ -823,6 +851,6 @@ void exec_LED_SET()
       #ifdef SERIAL_DEBUG
     Serial.println(ERROR);
     #endif
-    Wire.write(ATLAS_FAILED ERROR ATLAS_COMMAND_TERMINATOR);
+    I2CResponse(ATLAS_FAILED , ERROR );
   }
 }
