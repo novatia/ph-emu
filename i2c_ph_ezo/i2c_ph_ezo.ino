@@ -472,10 +472,16 @@ void I2CResponse(char result, String value)
     memset(g_I2CBuffer, 0, sizeof(g_I2CBuffer));
     
     g_I2CBuffer[0] = result;
-  
-    memset(g_I2CBuffer, 1, sizeof(value));
-   
-    g_I2CBuffer[sizeof(value)] = ATLAS_COMMAND_TERMINATOR;
+
+    size_t valueLength = value.length();
+    size_t maxLength = sizeof(g_I2CBuffer) - 2; // 1 byte for result, 1 byte for terminator
+    size_t lengthToCopy = min(valueLength, maxLength);
+    // Copy the string into the buffer starting from position 1
+    memcpy(&g_I2CBuffer[1], value.c_str(), lengthToCopy);
+
+    // Add terminator
+    g_I2CBuffer[lengthToCopy + 1] = ATLAS_COMMAND_TERMINATOR;
+    
     Wire.write((const uint8_t*)g_I2CBuffer, sizeof(g_I2CBuffer));
 }
 
