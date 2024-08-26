@@ -362,21 +362,19 @@ void requestEvent()
 {
   if (strcmp(command, "R") == 0) {
     exec_R();
-  } else if (strcmp(command, "Info") == 0 ||
-             strcmp(command, "i")    == 0 ||
-             strcmp(command, "I")    == 0) {
+  } else if (strcmp(command, "INFO") == 0) {
     exec_INFO();
-  } else if (strcmp(command, "Cal,?") == 0) {
+  } else if (strcmp(command, "CAL,?") == 0) {
     exec_CAL_QUERY();
-  } else if (strcmp(command, "Cal,clear") == 0) {
+  } else if (strcmp(command, "CAL,CLEAR") == 0) {
     exec_CAL_CLEAR();
-  } else if (strncmp(command, "Cal,low,", 8) == 0) {
+  } else if (strncmp(command, "CAL,LOW,", 8) == 0) {
     exec_CAL_LOW();
-  } else if (strcmp(command, "Cal,default") == 0) {
+  } else if (strcmp(command, "CAL,DEFAULT") == 0) {
     exec_CAL_DEFAULT();
-  } else if (strncmp(command, "Cal,mid,", 8) == 0) {
+  } else if (strncmp(command, "CAL,MID,", 8) == 0) {
     exec_CAL_MID();
-  } else if (strncmp(command, "Cal,high,", 9) == 0) {
+  } else if (strncmp(command, "CAL,HIGH,", 9) == 0) {
     exec_CAL_HIGH();
   } else if (strcmp(command, "SLEEP") == 0) {
     exec_SLEEP();
@@ -392,13 +390,13 @@ void requestEvent()
     exec_TEMP_QUERY();
   }else if (strncmp(command, "T,", 2) == 0) {
     exec_TEMP_COMP();
-  } else if ( strcmp(command, "Status") == 0 || strcmp(command, "STATUS") == 0) {
+  } else if ( strcmp(command, "STATUS") == 0 ) {
     exec_STATUS();
-  } else if (strcmp(command, "Find") == 0) {
+  } else if (strcmp(command, "FIND") == 0) {
     exec_FIND();
-  } else if (strcmp(command, "Factory") == 0 || strcmp(command, "X") == 0) {
+  } else if (strcmp(command, "FACTORY") == 0 || strcmp(command, "X") == 0) {
     exec_FACTORY();
-  } else if (strcmp(command, "name,?") == 0) {
+  } else if (strcmp(command, "NAME,?") == 0) {
     exec_NAME_QUERY();
   }else {
     I2CResponse( ATLAS_FAILED ,"Unknown");
@@ -415,6 +413,11 @@ void receiveEvent(int howMany) {
     if (c == ATLAS_COMMAND_CHAR_TERMINATOR || commandIndex >= sizeof(command) - 1) {
       command[commandIndex] = '\0'; // Null-terminate the string
       commandIndex = 0; // Reset command index
+
+      // Convert command to uppercase
+      for (int i = 0; i < commandIndex; i++) {
+        command[i] = toupper(command[i]);
+      }
     } else {
       command[commandIndex++] = c; // Store the character
     }
@@ -532,7 +535,7 @@ void exec_NAME_QUERY()
   #ifdef SERIAL_DEBUG
   Serial.write(DEFAULT_NAME);
   #endif
-  I2CResponse(ATLAS_SUCCEDED , DEFAULT_NAME);
+  I2CResponse(ATLAS_SUCCEDED ,"?name," DEFAULT_NAME);
 }
 
 //     Find: Causes the LED to blink for identifying the device.
