@@ -106,8 +106,7 @@ float g_Alpha = 1.0f / g_AverageNumSamples; // Smoothing factor
 bool g_AverageInit = false;
 
 
-char response[COMMAND_LENGHT];
-
+char g_I2CBuffer[COMMAND_LENGHT];
 
 void writeHash()
 {
@@ -219,7 +218,6 @@ void setup()
   print_TemperatureCompensationValues();
   #endif
 
-  memset(response, 0, sizeof(response));
 }
 
 void print_TemperatureCompensationValues()
@@ -426,23 +424,18 @@ void receiveEvent(int howMany) {
 // R: Takes a single pH reading.
 void exec_R()
 {
-    memset(response, 0, sizeof(response));
-    // Send pH value
-       
-    
+    char c_PHValue[6];
     float PHValue = temperatureCompensate(g_PHCalibratedValue,g_CompensationTemperature);
 
-    dtostrf(PHValue, 5, 2, response); // Convert float to string
+    dtostrf(PHValue, 5, 2, c_PHValue); // Convert float to string
     #ifdef SERIAL_DEBUG
-    Serial.println(response);
+    Serial.println(c_PHValue);
     #endif
-    //Wire.write(response);
-    Wire.write(  ATLAS_SUCCEDED );
-    Wire.write((const uint8_t*)response, sizeof(response));  // Sends the entire message including null terminator
+    I2CResponse(ATLAS_SUCCEDED ,c_PHValue );
     
-    dtostrf(g_PHAverageValue, 5, 2, response); // Convert float to string
+    dtostrf(g_PHAverageValue, 5, 2, c_PHValue); // Convert float to string
     #ifdef SERIAL_DEBUG
-    Serial.println(response);
+    Serial.println(c_PHValue);
     #endif
     
 }
@@ -468,16 +461,22 @@ void exec_TEMP_COMP()
     I2CResponse(ATLAS_SUCCEDED,"");
 }
 
+void I2CResponse(int statusCode, const char* message)
+{
+   String s_message(message);
+   I2CResponse(statusCode, s_message);
+}
+
 void I2CResponse(char result, String value) 
 {
-    memset(response, 0, sizeof(response));
+    memset(g_I2CBuffer, 0, sizeof(g_I2CBuffer));
     
-    response[0] = result;
- 
-    memset(response, 1, sizeof(value));
+    g_I2CBuffer[0] = result;
+  
+    memset(g_I2CBuffer, 1, sizeof(value));
    
-    response[sizeof(value)] = ATLAS_COMMAND_TERMINATOR;
-    Wire.write((const uint8_t*)response, sizeof(response));
+    g_I2CBuffer[sizeof(value)] = ATLAS_COMMAND_TERMINATOR;
+    Wire.write((const uint8_t*)g_I2CBuffer, sizeof(g_I2CBuffer));
 }
 
 void exec_TEMP_QUERY()
@@ -487,15 +486,16 @@ void exec_TEMP_QUERY()
     #endif
 
  // Send pH value
-    char response[COMMAND_LENGHT];
-    response[0] = 0;
-    dtostrf(g_CompensationTemperature, 5, 2, response); // Convert float to string
-   
-    //  Wire.write(response);
-    Wire.write(  ATLAS_SUCCEDED );
-    Wire.write( "?T," );
-    Wire.write((const uint8_t*)response, sizeof(response));  // Sends the entire message including null terminator
+    char c_temp[10];
+    c_temp[0] = 0;
+    dtostrf(g_CompensationTemperature, 5, 2, c_temp); // Convert float to string
+
+    String s_Response("?T,");
+    s_Response += c_temp; // Append the C-style string to the String object
+    
+    I2CResponse(ATLAS_SUCCEDED,s_Response );
 }
+
 // Information Commands
 //     Status: Retrieves the status of the device.
 //First Field (0): This is the device status code.
@@ -517,6 +517,7 @@ void exec_STATUS()
   #ifdef SERIAL_DEBUG
   Serial.write("?STATUS,0");
   #endif
+  
   I2CResponse(ATLAS_SUCCEDED ,"?STATUS,0");
 }
 
@@ -525,7 +526,7 @@ void exec_NAME_QUERY()
   #ifdef SERIAL_DEBUG
   Serial.write(DEFAULT_NAME);
   #endif
-  I2CResponse(ATLAS_SUCCEDED ,DEFAULT_NAME);
+  I2CResponse(ATLAS_SUCCEDED , DEFAULT_NAME);
 }
 
 //     Find: Causes the LED to blink for identifying the device.
@@ -775,13 +776,11 @@ void exec_I2C_QUERY()
     snprintf(c_address, sizeof(c_address), "0x%02X", g_I2CAddress);
     
     // Send the response over I2C
-    //Wire.write(response);
-    String s_address (c_address);
-    I2CResponse(ATLAS_SUCCEDED, s_address);
+    I2CResponse(ATLAS_SUCCEDED, c_address);
     
     #ifdef SERIAL_DEBUG
     Serial.print("Current I2C Address: ");
-    Serial.println(response);
+    Serial.println(g_I2CBuffer);
     #endif
 }
 
