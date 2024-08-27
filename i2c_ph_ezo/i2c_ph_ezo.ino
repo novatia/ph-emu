@@ -73,9 +73,9 @@
 
 
 //readings at 31°C
-PHCalibrationSample g_PHLowCalibration (663.88f,4.01f);
-PHCalibrationSample g_PHMidCalibration (577.00f,6.85f);
-PHCalibrationSample g_PHHighCalibration (488.21f,9.98f);
+PHCalibrationSample g_PHLowCalibration (628.41f,4.01f);
+PHCalibrationSample g_PHMidCalibration (523.00f,6.85f);
+PHCalibrationSample g_PHHighCalibration (450.21f,9.98f);
 
 bool g_PHCalibrated = false;
 bool g_PHLowCalibrated = false;
