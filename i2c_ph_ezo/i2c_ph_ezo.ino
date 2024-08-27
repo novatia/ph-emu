@@ -94,7 +94,7 @@ bool g_CompensationTemperatureSet = false;
 
 int g_I2CAddress = DEFAULT_I2C_ADDRESS;
 
-const int g_AverageNumSamples = 10;
+const int g_AverageNumSamples = 500;
 float g_PHAverageValue = 0.0f;
 float g_TAverageValue = 0.0f;
 
@@ -293,7 +293,7 @@ void loop()
 
     if (Serial.available())
     {
-      String cmd = Serial.readString();
+      String cmd = Serial.readStringUntil('\n');
       cmd.trim(); // Remove any leading/trailing whitespace/newlines
       if (cmd.length() < sizeof(command)) {
         // Copy the content of the String into the command buffer
