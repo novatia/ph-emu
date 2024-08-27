@@ -300,10 +300,18 @@ void loop()
         strncpy(command, cmd.c_str(), sizeof(command) - 1);
         command[sizeof(command) - 1] = '\0'; // Ensure null termination
         requestPending = true;
-
+      
+        // Convert command to uppercase
+        for (int i = 0; i < sizeof(command) - 1; i++) {
+          command[i] = toupper(command[i]);
+        }
+      
+        #ifdef SERIAL_DEBUG
+        Serial.println(command);
+        #endif
         requestEvent(); // Call the function to process the command
       } else {
-          #ifdef SERIAL_DEBUG
+        #ifdef SERIAL_DEBUG
         Serial.println("Error: Command too long");
         #endif
       }
@@ -644,6 +652,12 @@ float temperatureCompensate(float pH_measured, float temperature) {
  (577.00f,6.85f);
  (663.88f,4.01f);
  (488.21f,9.98f);
+
+
+ //readings at 31°C
+PHCalibrationSample g_PHLowCalibration (628.41f,4.01f);
+PHCalibrationSample g_PHMidCalibration (523.00f,6.85f);
+PHCalibrationSample g_PHHighCalibration (450.21f,9.98f);
 */
 void exec_CAL_DEFAULT()
 {
@@ -652,13 +666,13 @@ void exec_CAL_DEFAULT()
   g_PHMidCalibrated = true;
   g_PHHighCalibrated = true;
 
-  g_PHMidCalibration.rawValue = 577.00f;
+  g_PHMidCalibration.rawValue = 523.00f;
   g_PHMidCalibration.Value = 6.85f;
   
-  g_PHLowCalibration.rawValue = 663.88f;
+  g_PHLowCalibration.rawValue = 628.41f;
   g_PHLowCalibration.Value = 4.01f;
 
-  g_PHHighCalibration.rawValue = 488.21f;
+  g_PHHighCalibration.rawValue = 450.21f;
   g_PHHighCalibration.Value = 9.98f;
   
   g_PHCalibrationPoints = 3;
